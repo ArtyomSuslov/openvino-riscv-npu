@@ -41,6 +41,9 @@ private:
     size_t LDC = 0;
 
     bool with_bias = false;
+    
+    // Flag to distinguish execution modes
+    bool is_int8 = false; 
 };
 using ShlFCExecutorPtr = std::shared_ptr<ShlFCExecutor>;
 

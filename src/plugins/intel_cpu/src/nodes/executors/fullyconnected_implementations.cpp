@@ -177,6 +177,23 @@ struct CreateOptimalConfigDefault {
     }
 };
 
+static bool isShlSupported(const FCConfig& config) {
+    const auto src = srcType(config);
+    const auto wei = weiType(config);
+    const auto dst = dstType(config);
+    
+
+    bool is_int8 = (src == ov::element::i8) && 
+                   (wei == ov::element::i8) && 
+                   (dst == ov::element::f32);
+                   
+    bool is_f32 = (src == ov::element::f32) && 
+                  (wei == ov::element::f32) && 
+                  (dst == ov::element::f32);
+
+    return is_int8 || is_f32;
+}
+
 // to keep OV_CPU_INSTANCE macros aligned
 // clang-format off
 template <>
@@ -384,10 +401,19 @@ const std::vector<ExecutorImplementation<FCAttrs>>& getImplementations() {
             OperationType::FullyConnected,
             // supports
             [](const FCConfig& config) -> bool {
-                VERIFY(noPostOps(config), UNSUPPORTED_POST_OPS);
+                // 1. Сначала базовые проверки (Sparse/Decompression не поддерживаем нигде)
                 VERIFY(noSparseDecompression(config), UNSUPPORTED_SPARSE_WEIGHTS);
                 VERIFY(noWeightsDecompression(config), UNSUPPORTED_WEIGHTS_DECOMPRESSION);
-                VERIFY(all_of(f32, srcType(config), weiType(config), dstType(config)), UNSUPPORTED_SRC_PRECISIONS);
+                
+                // 2. Проверяем, подходит ли комбинация типов (int8 или f32)
+                VERIFY(isShlSupported(config), UNSUPPORTED_SRC_PRECISIONS);
+
+                // 3. Если режим F32 - строго запрещаем PostOps
+                if (srcType(config) == ov::element::f32) {
+                    VERIFY(noPostOps(config), UNSUPPORTED_POST_OPS);
+                }
+
+                // 4. Финальная проверка внутри самого класса
                 VERIFY(ShlFCExecutor::supports(config), UNSUPPORTED_BY_EXECUTOR);
 
                 return true;
