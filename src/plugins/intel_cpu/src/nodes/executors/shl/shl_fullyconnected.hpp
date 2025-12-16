@@ -43,7 +43,9 @@ private:
     bool with_bias = false;
     
     // Flag to distinguish execution modes
-    bool is_int8 = false; 
+    bool is_int8 = false;
+    // Хранилище для переупорядоченных весов, чтобы избежать утечки памяти
+    std::shared_ptr<void> m_reordered_wei_buffer = nullptr;
 };
 using ShlFCExecutorPtr = std::shared_ptr<ShlFCExecutor>;
 

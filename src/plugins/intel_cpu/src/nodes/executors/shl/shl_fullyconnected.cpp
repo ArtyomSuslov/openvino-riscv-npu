@@ -142,10 +142,13 @@ ShlFCExecutor::ShlFCExecutor(const FCAttrs& attrs, const MemoryArgs& memory, con
 
     // Allocate Shl tensors
     src = ShlTensor(sess, precisionToShlDataType(srcDesc->getPrecision()), getShlDataLayoutByMemoryDesc(srcDesc));
+    src.get()->dtype = CSINN_DTYPE_A_INT8_W_INT8_O_FLOAT32;
+
     wei = ShlTensor(sess,
                     precisionToShlDataType(weiDesc->getPrecision()),
                     getShlDataLayoutByMemoryDesc(weiDesc, true),
                     weiDesc->getShape().getStaticDims());
+    
     dst = ShlTensor(sess, precisionToShlDataType(dstDesc->getPrecision()), getShlDataLayoutByMemoryDesc(dstDesc));
 
     if (attrs.withBias) {
@@ -155,6 +158,19 @@ ShlFCExecutor::ShlFCExecutor(const FCAttrs& attrs, const MemoryArgs& memory, con
                          getShlDataLayoutByMemoryDesc(biasDesc),
                          biasDesc->getShape().getStaticDims());
         with_bias = true;
+    } else if (is_int8) {
+        VectorDims bias_shape = dst.getShape();
+        csinn_layout_enum bias_layout = getShlDataLayoutByMemoryDesc(memory.at(ARG_DST)->getDescPtr());
+
+        // Выделяем память и обнуляем
+        size_t num_elements = 1;
+        for (auto d : bias_shape) num_elements *= d;
+
+        // SHL обычно хранит float* для float32
+        void* bias_data = calloc(num_elements, sizeof(float));
+        OPENVINO_ASSERT(bias_data, "Failed to allocate memory for bias");
+        bias = ShlTensor(sess, CSINN_DTYPE_FLOAT32, bias_layout, bias_shape, bias_data);
+
     } else {
         bias = ShlTensor(sess);
     }
@@ -189,6 +205,8 @@ ShlFCExecutor::ShlFCExecutor(const FCAttrs& attrs, const MemoryArgs& memory, con
             wei.get()->qinfo[i].scale = 1.0f;
             wei.get()->qinfo[i].zero_point = 0;
         }
+
+        void* original_ptr = wei.getData();
         
         // 4. Вызываем INIT
         // Библиотека сама должна вызвать функцию перепаковки весов (reorder), 
@@ -202,6 +220,12 @@ ShlFCExecutor::ShlFCExecutor(const FCAttrs& attrs, const MemoryArgs& memory, con
         if (ret != CSINN_TRUE) {
             OPENVINO_THROW("ShlFCExecutor: failed to init INT8 FC");
         }
+
+        void* new_ptr = wei.getData();
+        if (new_ptr != original_ptr) {
+            m_reordered_wei_buffer.reset(new_ptr, free);
+        }
+
     } else {
         // Старый F32 init
         OPENVINO_ASSERT(csinn_fullyconnected_init(src.get(),
